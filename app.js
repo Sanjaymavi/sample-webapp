@@ -1,97 +1,48 @@
 const express = require('express');
-const promClient = require('prom-client');
-const bodyParser = require('body-parser');
+const client = require('prom-client');
 
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Middleware to parse JSON body
-app.use(bodyParser.json());
+// Enable collection of default metrics (CPU, RAM, event loop lag, etc.)
+const collectDefaultMetrics = client.collectDefaultMetrics;
+collectDefaultMetrics();
 
-// -----------------------------
-//  Prometheus Metrics Setup
-// -----------------------------
-const collectDefaultMetrics = promClient.collectDefaultMetrics;
-collectDefaultMetrics(); // collects CPU, memory, event loop metrics, etc.
-
-const httpRequestCounter = new promClient.Counter({
-    name: 'http_requests_total',
-    help: 'Total number of HTTP requests',
-    labelNames: ['method', 'route', 'status'],
+// Custom Counter (example)
+const requestCounter = new client.Counter({
+    name: 'app_requests_total',
+    help: 'Total number of requests received',
+    labelNames: ['method', 'route']
 });
-
-const httpRequestDuration = new promClient.Histogram({
-    name: 'http_request_duration_seconds',
-    help: 'HTTP request duration histogram',
-    labelNames: ['method', 'route', 'status'],
-    buckets: [0.1, 0.3, 0.5, 1, 2, 5]
-});
-
-// Middleware to record metrics
-app.use((req, res, next) => {
-    const end = httpRequestDuration.startTimer();
-    res.on('finish', () => {
-        httpRequestCounter.inc({ method: req.method, route: req.path, status: res.statusCode });
-        end({ method: req.method, route: req.path, status: res.statusCode });
-    });
-    next();
-});
-
-// -----------------------------
-//  In-memory Data
-// -----------------------------
-let items = [];
-
-// -----------------------------
-//  Endpoints
-// -----------------------------
 
 // Root endpoint
 app.get('/', (req, res) => {
-    res.send('Hello from Node.js App with Metrics!');
+    requestCounter.inc({ method: 'GET', route: '/' });
+    res.send('Hello from Node.js Dockerized App with Metrics!');
 });
 
-// GET /items
-app.get('/items', (req, res) => {
-    res.json({
-        success: true,
-        data: items
-    });
+// A sample GET API endpoint
+app.get('/hello', (req, res) => {
+    requestCounter.inc({ method: 'GET', route: '/hello' });
+    res.json({ message: 'Hello API Works!' });
 });
 
-// POST /items
-app.post('/items', (req, res) => {
-    const item = req.body;
-
-    if (!item || !item.name) {
-        return res.status(400).json({
-            success: false,
-            message: "Item must have a 'name' field"
-        });
-    }
-
-    items.push(item);
-
-    res.status(201).json({
-        success: true,
-        message: "Item added",
-        data: item
-    });
+// A sample POST API endpoint
+app.post('/data', express.json(), (req, res) => {
+    requestCounter.inc({ method: 'POST', route: '/data' });
+    res.json({ received: req.body });
 });
 
-// Prometheus Metrics Endpoint
+// Metrics endpoint for Prometheus
 app.get('/metrics', async (req, res) => {
     try {
-        res.set('Content-Type', promClient.register.contentType);
-        res.end(await promClient.register.metrics());
+        res.set('Content-Type', client.register.contentType);
+        res.end(await client.register.metrics());
     } catch (err) {
         res.status(500).end(err);
     }
 });
 
-// -----------------------------
-//  Start Server
-// -----------------------------
 app.listen(port, () => {
     console.log(`Server running on port ${port}`);
 });
